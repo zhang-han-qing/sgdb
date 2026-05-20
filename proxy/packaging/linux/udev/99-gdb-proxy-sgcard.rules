@@ -1,0 +1,8 @@
+# /etc/udev/rules.d/99-gdb-proxy-sgcard.rules
+#
+# 兜底：host 调试 FIFO 设备节点出现时拉起对应 gdb-proxy@N。
+# 主路径仍走 modprobe.d；用于节点晚于 modprobe 或绕开钩子的场景。
+#
+# 修改后：udevadm control --reload-rules && udevadm trigger
+
+ACTION=="add", KERNEL=="sg-host-drv-[0-9]*", TAG+="systemd", ENV{SYSTEMD_WANTS}+="gdb-proxy-refresh.service"

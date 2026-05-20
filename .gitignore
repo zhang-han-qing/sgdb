@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# sgdb 运行时缓存（README: <repo>/.sgdb_cache/...）
+.sgdb_cache/
+
+# 编辑器 / 系统
+.DS_Store
+*~

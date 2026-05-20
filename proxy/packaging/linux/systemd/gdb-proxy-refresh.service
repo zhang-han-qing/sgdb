@@ -1,0 +1,8 @@
+[Unit]
+Description=Refresh TPU GDB proxy instances
+After=network.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/lib/tpu-gdb-proxy/scripts/gdb_proxy_instances.sh refresh

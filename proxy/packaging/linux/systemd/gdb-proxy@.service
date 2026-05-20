@@ -1,0 +1,28 @@
+[Unit]
+Description=TPU GDB transparent proxy (dev-index %i, host-side FIFO)
+After=network.target
+# 单卡机器上未 probe 的 index 不启动，避免无节点时反复 restart
+ConditionPathExists=/dev/sg-host-drv-%i
+
+# 由 modprobe 钩子 / udev 按需 start；若要开机自启请 enable gdb-proxy@N
+
+[Service]
+Type=simple
+User=root
+
+Environment="GDB_PROXY_LISTEN_HOST=0.0.0.0" "GDB_PROXY_NUM_CORE=8"
+EnvironmentFile=-/etc/default/gdb-proxy
+
+WorkingDirectory=/usr/lib/tpu-gdb-proxy
+ExecStart=/usr/bin/python3 /usr/lib/tpu-gdb-proxy/proxy_fast.py \
+    --listen-host ${GDB_PROXY_LISTEN_HOST} \
+    --num-core ${GDB_PROXY_NUM_CORE} \
+    --dev-index %i
+
+KillSignal=SIGTERM
+TimeoutStopSec=10
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
