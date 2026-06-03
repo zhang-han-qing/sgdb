@@ -1,0 +1,3 @@
+[submodule "gdbserver2"]
+	path = gdbserver2
+	url = git@github.com:zhang-han-qing/gdbserver2.git
