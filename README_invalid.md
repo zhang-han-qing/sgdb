@@ -83,7 +83,7 @@ script tpu_hang_info 0
 - 每次会提示：`[tpu-attach] update sysroot from remote? (y/N):`
 
 命令会提示输入 target ip（默认记忆上次输入），端口固定公式：
-- `50090 + device-id * 100 + tp-sys-id`
+- `40090 + device-id * 100 + tp-sys-id`
 
 ## Sysroot 缓存
 

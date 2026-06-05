@@ -128,7 +128,11 @@ class MultiTuiApp(App):
         Binding("ctrl+c", "interrupt", "Interrupt focused core", show=True),
     ]
 
-    def __init__(self, manager: SessionManager) -> None:
+    def __init__(
+        self,
+        manager: SessionManager,
+        attach_by_core: dict[int, str] | None = None,
+    ) -> None:
         super().__init__()
         self.manager = manager
         self.panels: dict[int, CorePanel] = {}
@@ -137,6 +141,11 @@ class MultiTuiApp(App):
         self._dirty_status: set[int] = set()
         # One-shot: re-sync the initially-focused core's size once gdb is up.
         self._focused_resized = False
+        # Per-core command to run once the core reaches the (gdb) prompt. The
+        # focused core additionally waits for its first resize/SIGWINCH so its
+        # attach sequence is never interrupted (EINTR) by a late SIGWINCH.
+        self._attach_by_core: dict[int, str] = attach_by_core or {}
+        self._attached: set[int] = set()
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="body"):
@@ -209,6 +218,24 @@ class MultiTuiApp(App):
                 if size.width > 0 and size.height > 0:
                     self._terminal._sync_size()
                     self._focused_resized = True
+        self._maybe_send_attach(session)
+
+    def _maybe_send_attach(self, session: CoreSession) -> None:
+        cid = session.core_id
+        if cid in self._attached:
+            return
+        command = self._attach_by_core.get(cid)
+        if not command:
+            return
+        # Focused core: wait until its initial resize/SIGWINCH has fired, so the
+        # attach syscalls (target/info/attach) won't be interrupted by EINTR.
+        if cid == self.manager.focused and not self._focused_resized:
+            return
+        # Ready == gdb is idle at the (gdb) prompt (plugins sourced).
+        if session.status() != "STOP":
+            return
+        session.write_line(command)
+        self._attached.add(cid)
 
     def _mark_dead(self, session: CoreSession) -> None:
         loop = asyncio.get_running_loop()
@@ -337,13 +364,23 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    attach_by_core: dict[int, str] = {}
     if args.ip:
-        from .sgdb_launch import SGDB_ROOT, build_sgdb_argv, default_core_num
+        from .sgdb_launch import (
+            SGDB_ROOT,
+            build_attach_command,
+            build_sgdb_argv,
+            default_core_num,
+        )
 
         cores = args.cores or default_core_num(args.device)
         core_ids = list(range(cores))
         argv_by_core = {
             cid: build_sgdb_argv(args.gdb, args.device, args.device_id, cid, args.ip)
+            for cid in core_ids
+        }
+        attach_by_core = {
+            cid: build_attach_command(args.device, args.device_id, cid, args.ip)
             for cid in core_ids
         }
         manager = SessionManager(
@@ -354,7 +391,7 @@ def main() -> None:
         manager = SessionManager.from_command(
             args.cmd, core_ids, cols=args.cols, rows=args.rows
         )
-    MultiTuiApp(manager).run()
+    MultiTuiApp(manager, attach_by_core).run()
 
 
 if __name__ == "__main__":

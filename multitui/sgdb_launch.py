@@ -27,8 +27,16 @@ def build_sgdb_argv(
         "-q",
         "-iex", "set pagination off",
         "-iex", f"source {plugin_init}",
-        "-ex", f"tp-attach {device_type} {device_id} {core_id} {ip}",
     ]
+
+
+def build_attach_command(
+    device_type: str,
+    device_id: int,
+    core_id: int,
+    ip: str,
+) -> str:
+    return f"tp-attach {device_type} {device_id} {core_id} {ip}"
 
 
 def default_core_num(device_type: str, fallback: int = 2) -> int:

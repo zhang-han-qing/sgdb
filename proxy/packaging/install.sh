@@ -73,9 +73,11 @@ install -m 0644 "${SCRIPT_DIR}/linux/udev/99-gdb-proxy-sgcard.rules" \
 cat <<EOF
 [install] done. PREFIX=${PREFIX} DEVICE_TYPE=${DEVICE_TYPE} NUM_CORE=${NUM_CORE}
 
-首次安装完成后请手动执行：
+安装完成后请手动执行如下命令后，重启驱动模块：
 
   sudo systemctl daemon-reload
   sudo udevadm control --reload-rules
+
+执行后可手动检查 sudo systemctl status "gdb-proxy@*" 命令是否有输出。
 
 EOF

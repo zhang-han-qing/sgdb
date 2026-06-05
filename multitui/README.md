@@ -90,7 +90,7 @@ PYTHONPATH=. multitui/.venv/bin/python multitui/__main__.py --ip ...
 - `--cores`：核数，不传则取设备默认（1690=2，1690e=4）；
 - `--gdb`：默认 `gdb-multiarch`。
 
-端口 = `50090 + device-id*100 + core`。需保证该端口（设备/代理）可达，且 sgdb 插件目录完整。
+端口 = `40090 + device-id*100 + core`。需保证该端口（设备/代理）可达，且 sgdb 插件目录完整。
 
 操作：
 

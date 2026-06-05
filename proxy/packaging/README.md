@@ -83,6 +83,6 @@ journalctl -u 'gdb-proxy@*' -e
 
 - **务必使用 `modprobe` / `modprobe -r`**，勿裸 `rmmod`。
 - **`modprobe` 路径**：钩子里为 `/sbin/modprobe`，部分系统需改为 `/usr/sbin/modprobe`。
-- **端口规则**：按 `50090 + dev-index * 100 + core-id` 固定计算。
+- **端口规则**：按 `40090 + dev-index * 100 + core-id` 固定计算。
 - **网络**：默认 `0.0.0.0`；生产建议 `127.0.0.1` 或防火墙。
 - **其它 fd 持有者**：stop proxy 后若仍无法 `rmmod`，检查是否有其它进程占用同一设备节点。

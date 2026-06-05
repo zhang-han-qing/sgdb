@@ -31,7 +31,7 @@ from transport import (
 )
 
 MAX_CORES = 8
-BASE_PORT = 50090
+BASE_PORT = 40090
 TPU_ERR_MSG_SIZE = 4
 
 ACCEPT_TIMEOUT_S = 0.5
