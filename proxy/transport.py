@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import errno
+import fcntl
 import mmap
 import os
 import struct
@@ -7,6 +8,9 @@ import time
 
 BAR4_PART4_OFFSET = 0xD00000
 BAR4_DBGFIFO_SIZE = 0x300000
+
+# Must match driver: _IOW('D', 0x01, int)
+SG_DBG_RING_DOORBELL = 0x40044401
 
 DBG_FIFO_H2D_SIZE = 0x100000
 DBG_FIFO_D2H_SIZE = 0x100000
@@ -20,13 +24,12 @@ DIR_H2D = 0
 DIR_D2H = 1
 DIR_D2H_ASYNC = 2
 
-TP_DB_BAR4_OFFSET_BASE = 0x601000  # after veth [0x401000,0x601000), before rp @0x800000
-TP_DB_WINDOW_STRIDE = 0x1000  # doorbell 映射地址的间隔是 4k 字节 
 MAX_CORES = 8
+TP_DB_WINDOW_STRIDE = 0x1000  # kept for layout comment only
 
 MMAP_REGIONS = {
     "dbgfifo": (BAR4_PART4_OFFSET, BAR4_DBGFIFO_SIZE),
-    "doorbell": (TP_DB_BAR4_OFFSET_BASE, TP_DB_WINDOW_STRIDE * MAX_CORES),
+    # Doorbell no longer mmap'ed directly. Use ioctl SG_DBG_RING_DOORBELL on the fd.
 }
 
 # 
@@ -42,13 +45,9 @@ MMAP_REGIONS = {
 # │                            │  └──────────┘ └──────────┘ └──────────┘   │   │
 # │                            └─────────────────────────────────────────——┘   │
 # │                                                                            │
-# │  BAR4 + 0x601000           ┌─────────── doorbell 32KB ────────────────┐    │
-# │                            │  ┌────┐┌────┐┌────┐┌────┐┌────┐┌────┐┌────┐┌────┐ │
-# │                            │  │c0  ││c1  ││c2  ││c3  ││c4  ││c5  ││c6  ││c7  │ │
-# │                            │  │4KB ││4KB ││4KB ││4KB ││4KB ││4KB ││4KB ││4KB │ │
-# │                            │  └────┘└────┘└────┘└────┘└────┘└────┘└────┘└────┘ │
-# │                            └─────────────────────────────────────────┘   │
-# │                                                                             │
+# │  Doorbell: no longer a fixed mmap region.                                  │
+# │  Ringing is performed via ioctl(SG_DBG_RING_DOORBELL) on the device fd,    │
+# │  which uses BAR1's existing sliding ATU on demand (saves ATU slots).       │
 # └─────────────────────────────────────────────────────────────────────────────┘
 
 U32 = struct.Struct("<I")
@@ -118,7 +117,6 @@ def _channel_base(core_id: int, channel: int) -> int:
 def open_io(dev_path: str):
     fd = os.open(dev_path, os.O_RDWR | os.O_CLOEXEC)
     dbgfifo_offset, dbgfifo_size = MMAP_REGIONS["dbgfifo"]
-    doorbell_offset, doorbell_size = MMAP_REGIONS["doorbell"]
     dbgfifo_vaddr = mmap.mmap(
         fd,
         dbgfifo_size,
@@ -126,14 +124,8 @@ def open_io(dev_path: str):
         prot=mmap.PROT_READ | mmap.PROT_WRITE,
         offset=dbgfifo_offset,
     )
-    doorbell = mmap.mmap(
-        fd,
-        doorbell_size,
-        flags=mmap.MAP_SHARED,
-        prot=mmap.PROT_READ | mmap.PROT_WRITE,
-        offset=doorbell_offset,
-    )
-    return fd, dbgfifo_vaddr, doorbell
+    # Note: no longer mapping doorbell. Ringing is done via ioctl on fd.
+    return fd, dbgfifo_vaddr
 
 
 def reset_h2d_ring_ctrl(dbgfifo_vaddr: mmap.mmap, core_id: int) -> None:
@@ -146,8 +138,7 @@ def reset_d2h_ring_ctrl(dbgfifo_vaddr: mmap.mmap, core_id: int) -> None:
     _RING_CTRL.pack_into(dbgfifo_vaddr, base, 0, 0)
 
 
-def close_io(fd: int, dbgfifo_vaddr: mmap.mmap, doorbell: mmap.mmap) -> None:
-    doorbell.close()
+def close_io(fd: int, dbgfifo_vaddr: mmap.mmap) -> None:
     dbgfifo_vaddr.close()
     os.close(fd)
 
@@ -191,7 +182,8 @@ def read_available(dbgfifo_vaddr: mmap.mmap, core_id: int, channel: int) -> byte
     return data
 
 
-def ring_doorbell(doorbell_vaddr: mmap.mmap, core_id: int) -> None:
+def ring_doorbell(fd: int, core_id: int) -> None:
+    """Ring TP doorbell via kernel ioctl (uses sliding ATU on BAR1)."""
     if core_id < 0 or core_id >= MAX_CORES:
         raise ValueError(f"invalid core_id: {core_id}")
-    _write_u32(doorbell_vaddr, core_id * TP_DB_WINDOW_STRIDE, 0x1)
+    fcntl.ioctl(fd, SG_DBG_RING_DOORBELL, struct.pack('i', core_id))

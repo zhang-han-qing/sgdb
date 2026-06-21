@@ -150,9 +150,9 @@ class CorePollingThread(threading.Thread):
         if not data:
             return
         assert self.manager.dbgfifo_vaddr is not None
-        assert self.manager.doorbell_vaddr is not None
+        assert self.manager.dbg_event_fd is not None
         write_h2d(self.manager.dbgfifo_vaddr, self.core_id, data)
-        ring_doorbell(self.manager.doorbell_vaddr, self.core_id)
+        ring_doorbell(self.manager.dbg_event_fd, self.core_id)
 
     def _send_chunk(self, conn: socket.socket, chunk: bytes) -> bool:
         view = memoryview(chunk)
@@ -275,16 +275,16 @@ class ProxyFastManager:
         self._active_conn = 0
         self._fd = None
         self.dbgfifo_vaddr = None
-        self.doorbell_vaddr = None
+        self.dbg_event_fd = None
 
     def acquire_io(self) -> None:
         with self._io_lock:
             if self._active_conn == 0:
                 dev_path = f"/dev/tpu_dbg_event{self.dev_index}"
-                fd, dbgfifo_vaddr, doorbell_vaddr = open_io(dev_path)
+                fd, dbgfifo_vaddr = open_io(dev_path)
                 self._fd = fd
                 self.dbgfifo_vaddr = dbgfifo_vaddr
-                self.doorbell_vaddr = doorbell_vaddr
+                self.dbg_event_fd = fd
                 print(f"[proxy_fast] io opened (dev-index={self.dev_index})", flush=True)
             self._active_conn += 1
 
@@ -294,10 +294,10 @@ class ProxyFastManager:
                 return
             self._active_conn -= 1
             if self._active_conn == 0 and self._fd is not None:
-                close_io(self._fd, self.dbgfifo_vaddr, self.doorbell_vaddr)
+                close_io(self._fd, self.dbgfifo_vaddr)
                 self._fd = None
                 self.dbgfifo_vaddr = None
-                self.doorbell_vaddr = None
+                self.dbg_event_fd = None
                 print(f"[proxy_fast] io closed (dev-index={self.dev_index})", flush=True)
 
     def force_close_io(self) -> None:
@@ -305,10 +305,10 @@ class ProxyFastManager:
             self._active_conn = 0
             if self._fd is None:
                 return
-            close_io(self._fd, self.dbgfifo_vaddr, self.doorbell_vaddr)
+            close_io(self._fd, self.dbgfifo_vaddr)
             self._fd = None
             self.dbgfifo_vaddr = None
-            self.doorbell_vaddr = None
+            self.dbg_event_fd = None
             print(f"[proxy_fast] io force-closed (dev-index={self.dev_index})", flush=True)
 
     def run(self) -> None:

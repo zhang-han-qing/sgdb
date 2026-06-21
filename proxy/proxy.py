@@ -80,7 +80,7 @@ class GdbServiceThread(threading.Thread):
         host: str,
         port: int,
         dbgfifo_vaddr,
-        doorbell_vaddr,
+        dbg_event_fd: int,   # used for ioctl ringing (sliding ATU)
         event_queue: "queue.Queue[int]",
         stop_event: threading.Event,
     ):
@@ -89,7 +89,7 @@ class GdbServiceThread(threading.Thread):
         self.host = host
         self.port = port
         self.dbgfifo_vaddr = dbgfifo_vaddr
-        self.doorbell_vaddr = doorbell_vaddr
+        self.dbg_event_fd = dbg_event_fd
         self.event_queue = event_queue
         self.stop_event = stop_event
         self._gdb_rx: bytearray = bytearray()
@@ -110,10 +110,10 @@ class GdbServiceThread(threading.Thread):
                 if conn is None:
                     continue
                 try:
-                    self.on_gdb_connect(conn, self.dbgfifo_vaddr, self.doorbell_vaddr)
-                    self._serve_client(conn, self.dbgfifo_vaddr, self.doorbell_vaddr)
+                    self.on_gdb_connect(conn, self.dbgfifo_vaddr)
+                    self._serve_client(conn, self.dbgfifo_vaddr)
                 finally:
-                    self.on_gdb_disconnect(conn, self.dbgfifo_vaddr, self.doorbell_vaddr)
+                    self.on_gdb_disconnect(conn, self.dbgfifo_vaddr)
                     conn.close()
         finally:
             listen_sock.close()
@@ -128,32 +128,31 @@ class GdbServiceThread(threading.Thread):
         print(f"[proxy] core={self.core_id} gdb connected: {peer}")
         return conn
 
-    def on_gdb_connect(self, conn: socket.socket, dbgfifo_vaddr, doorbell_vaddr) -> None:
+    def on_gdb_connect(self, conn: socket.socket, dbgfifo_vaddr) -> None:
         self._gdb_rx = bytearray()
         self._async_rx = bytearray()
         reset_h2d_ring_ctrl(dbgfifo_vaddr, self.core_id)
         reset_d2h_ring_ctrl(dbgfifo_vaddr, self.core_id)
 
-    def on_gdb_disconnect(self, conn: socket.socket, dbgfifo_vaddr, doorbell_vaddr) -> None:
+    def on_gdb_disconnect(self, conn: socket.socket, dbgfifo_vaddr) -> None:
         # 通道断开：先 Ctrl-C 停核，再 monitor exit（杀 gdbserver 并重建）。
         try:
-            # self._gdb_stream_to_h2d(b"\x03", dbgfifo_vaddr, doorbell_vaddr)
-            self._gdb_stream_to_h2d(rsp_qrcmd(b"exit"), dbgfifo_vaddr, doorbell_vaddr)
+            self._gdb_stream_to_h2d(rsp_qrcmd(b"exit"), dbgfifo_vaddr)
         except (TimeoutError, OSError) as e:
             print(
                 f"[proxy] core={self.core_id} stop+exit on disconnect: {e}",
                 flush=True,
             )
 
-    def _gdb_stream_to_h2d(self, data: bytes, dbgfifo_vaddr, doorbell_vaddr) -> None:
+    def _gdb_stream_to_h2d(self, data: bytes, dbgfifo_vaddr) -> None:
         """ 整段原样写入 H2D（包括 0x03 ）"""
         if not data:
             return
         write_h2d(dbgfifo_vaddr, self.core_id, data)
-        ring_doorbell(doorbell_vaddr, self.core_id)
+        ring_doorbell(self.dbg_event_fd, self.core_id)
 
     def _feed_gdb_to_device(
-        self, data: bytes, conn: socket.socket, dbgfifo_vaddr, doorbell_vaddr
+        self, data: bytes, conn: socket.socket, dbgfifo_vaddr
     ) -> None:
         out = filter_h2d_stream(
             self._gdb_rx,
@@ -162,9 +161,9 @@ class GdbServiceThread(threading.Thread):
             lambda r: self._send_chunk(conn, r),
         )
         if out:
-            self._gdb_stream_to_h2d(out, dbgfifo_vaddr, doorbell_vaddr)
+            self._gdb_stream_to_h2d(out, dbgfifo_vaddr)
 
-    def _recv_from_gdb(self, conn: socket.socket, dbgfifo_vaddr, doorbell_vaddr) -> bool:
+    def _recv_from_gdb(self, conn: socket.socket, dbgfifo_vaddr) -> bool:
         """一次尽量多读，减少 select/recv 往返。"""
         for _ in range(MAX_RECV_BATCH):
             try:
@@ -179,7 +178,7 @@ class GdbServiceThread(threading.Thread):
                 print(f"[proxy] core={self.core_id} gdb disconnected")
                 return False
 
-            self._feed_gdb_to_device(data, conn, dbgfifo_vaddr, doorbell_vaddr)
+            self._feed_gdb_to_device(data, conn, dbgfifo_vaddr)
             if len(data) < 4096:
                 break
 
@@ -191,7 +190,7 @@ class GdbServiceThread(threading.Thread):
         progressed |= self._drain_device_rings(conn, dbgfifo_vaddr)
         return progressed
 
-    def _serve_client(self, conn: socket.socket, dbgfifo_vaddr, doorbell_vaddr) -> None:
+    def _serve_client(self, conn: socket.socket, dbgfifo_vaddr) -> None:
         while not self.stop_event.is_set():
             progressed = False
 
@@ -204,7 +203,7 @@ class GdbServiceThread(threading.Thread):
             timeout = 0.0 if progressed else CLIENT_IO_WAIT_S
             readable, _, _ = select.select([conn], [], [], timeout)
             if readable:
-                if not self._recv_from_gdb(conn, dbgfifo_vaddr, doorbell_vaddr):
+                if not self._recv_from_gdb(conn, dbgfifo_vaddr):
                     return
                 progressed = True
 
@@ -321,7 +320,7 @@ class ProxyManager:
         signal.signal(signal.SIGINT, _request_stop)
 
         dev_path = f"/dev/tpu_dbg_event{self.dev_index}"
-        fd, dbgfifo_vaddr, doorbell_vaddr = open_io(dev_path)
+        fd, dbgfifo_vaddr = open_io(dev_path)
         os.set_blocking(fd, False)
         self.dispatcher = EventDispatchThread(
             event_fd=fd,
@@ -334,7 +333,7 @@ class ProxyManager:
                 host=self.host,
                 port=_fixed_port(self.dev_index, i),
                 dbgfifo_vaddr=dbgfifo_vaddr,
-                doorbell_vaddr=doorbell_vaddr,
+                dbg_event_fd=fd,
                 event_queue=self.per_core_queue[i],  # 事件队列
                 stop_event=self.stop_event,  # 事件信号
             )
@@ -355,7 +354,7 @@ class ProxyManager:
                 self.dispatcher.join(timeout=2.0)
             for t in self.services:
                 t.join(timeout=2.0)
-            close_io(fd, dbgfifo_vaddr, doorbell_vaddr)
+            close_io(fd, dbgfifo_vaddr)
 
 
 def main() -> None:
