@@ -1,5 +1,5 @@
 # /etc/default/gdb-proxy — global defaults for all gdb-proxy@N instances.
-# Core count is selected at install time by device type (1690=8, 1690e=4).
+# Core count is selected at install time (1690=8, 1690e/cv84x6=4).
 
 GDB_PROXY_LISTEN_HOST=0.0.0.0
 GDB_PROXY_NUM_CORE=8

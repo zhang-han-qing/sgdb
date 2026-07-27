@@ -6,11 +6,15 @@ import os
 import struct
 import time
 
-BAR4_PART4_OFFSET = 0xD00000
-BAR4_DBGFIFO_SIZE = 0x300000
+# Driver mmap ABI token; this is not a platform physical/BAR address.
+DBG_FIFO_MMAP_OFFSET = 0xD00000
+DBG_FIFO_MMAP_SIZE = 0x300000
 
 # Must match driver: _IOW('D', 0x01, int)
 SG_DBG_RING_DOORBELL = 0x40044401
+# Optional driver barrier: _IO('D', 0x02)
+SG_DBG_RING_ACQUIRE = 0x4402
+_ring_acquire_supported: bool | None = None
 
 DBG_FIFO_H2D_SIZE = 0x100000
 DBG_FIFO_D2H_SIZE = 0x100000
@@ -25,30 +29,17 @@ DIR_D2H = 1
 DIR_D2H_ASYNC = 2
 
 MAX_CORES = 8
-TP_DB_WINDOW_STRIDE = 0x1000  # kept for layout comment only
 
 MMAP_REGIONS = {
-    "dbgfifo": (BAR4_PART4_OFFSET, BAR4_DBGFIFO_SIZE),
+    "dbgfifo": (DBG_FIFO_MMAP_OFFSET, DBG_FIFO_MMAP_SIZE),
     # Doorbell no longer mmap'ed directly. Use ioctl SG_DBG_RING_DOORBELL on the fd.
 }
 
-# 
-# ┌──────────────────────── BAR4 mmap 内存布局 ───────────────────────────────——┐
-# │                                                                            │
-# │  BAR4 + 0xD0000            ┌──────────────── dbgfifo 3MB ──────────────┐   │
-# │                            │                                           │   │
-# │  +0xD0000  (H2D)           │  ┌──────────┐ ┌──────────┐ ┌──────────┐   │   │
-# │                            │  │  H2D 1MB │ │ D2H 1MB  │ │ASYNC 1MB │   │   │
-# │  +0xE0000  (D2H)           │  │ 8×128KB  │ │ 8×128KB  │ │ 8×128KB  │   │   │
-# │                            │  └──────────┘ └──────────┘ └──────────┘   │   │
-# │  +0xF0000  (D2H_ASYNC)     │  │  dir=0   │ │  dir=1   │ │  dir=2   │   │   │
-# │                            │  └──────────┘ └──────────┘ └──────────┘   │   │
-# │                            └─────────────────────────────────────────——┘   │
-# │                                                                            │
-# │  Doorbell: no longer a fixed mmap region.                                  │
-# │  Ringing is performed via ioctl(SG_DBG_RING_DOORBELL) on the device fd,    │
-# │  which uses BAR1's existing sliding ATU on demand (saves ATU slots).       │
-# └─────────────────────────────────────────────────────────────────────────────┘
+# Platform-neutral 3MB mapping layout (offsets relative to mapped memory):
+#   +0x000000 H2D       1MB, 8 x 128KB slots
+#   +0x100000 D2H       1MB, 8 x 128KB slots
+#   +0x200000 D2H_ASYNC 1MB, 8 x 128KB slots
+# Doorbell delivery uses SG_DBG_RING_DOORBELL on the same device fd.
 
 U32 = struct.Struct("<I")
 _RING_CTRL = struct.Struct("<II")  # head, tail — 一次读/写 8 字节，避免轮询里重复 unpack
@@ -169,13 +160,28 @@ def write_h2d(dbgfifo_vaddr: mmap.mmap, core_id: int, data: bytes, timeout_s: fl
     _write_u32(dbgfifo_vaddr, base, new_head)
 
 
-def read_available(dbgfifo_vaddr: mmap.mmap, core_id: int, channel: int) -> bytes:
+def _acquire_d2h(fd: int) -> None:
+    global _ring_acquire_supported
+    if _ring_acquire_supported is False:
+        return
+    try:
+        fcntl.ioctl(fd, SG_DBG_RING_ACQUIRE)
+        _ring_acquire_supported = True
+    except OSError as exc:
+        if exc.errno != errno.ENOTTY:
+            raise
+        _ring_acquire_supported = False
+
+
+def read_available(fd: int, dbgfifo_vaddr: mmap.mmap, core_id: int, channel: int) -> bytes:
     base = _channel_base(core_id, channel)
     head, tail = _read_ring_ctrl(dbgfifo_vaddr, base)
     used = _ring_used(head, tail, DBG_FIFO_RING_PAYLOAD_SIZE)
     if used == 0:
         return b""
 
+    if channel != DIR_H2D:
+        _acquire_d2h(fd)
     data_base = base + DBG_FIFO_RING_CTRL_SIZE
     data = _ring_memcpy_read(dbgfifo_vaddr, data_base, tail, used)
     _write_u32(dbgfifo_vaddr, base + 4, (tail + used) % DBG_FIFO_RING_PAYLOAD_SIZE)
@@ -183,7 +189,7 @@ def read_available(dbgfifo_vaddr: mmap.mmap, core_id: int, channel: int) -> byte
 
 
 def ring_doorbell(fd: int, core_id: int) -> None:
-    """Ring TP doorbell via kernel ioctl (uses sliding ATU on BAR1)."""
+    """Ring the TP doorbell via the kernel ioctl."""
     if core_id < 0 or core_id >= MAX_CORES:
         raise ValueError(f"invalid core_id: {core_id}")
     fcntl.ioctl(fd, SG_DBG_RING_DOORBELL, struct.pack('i', core_id))

@@ -63,6 +63,7 @@ Usage:
 
 Examples:
   sgdb multiui --ip 172.24.12.100 --device 1690 --cores 8 --gdb gdb-multiarch
+  sgdb multiui --ip 172.24.12.100 --device cv84x6 --cores 4 --gdb gdb-multiarch
 HELP
         ;;
     *)

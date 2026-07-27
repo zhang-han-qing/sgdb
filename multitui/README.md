@@ -66,7 +66,7 @@ PYTHONPATH=. multitui/.venv/bin/python -m multitui --cores 4
 PYTHONPATH=. multitui/.venv/bin/python -m multitui --cores 8 --cmd gdb
 ```
 
-### 2) SGDB 接入模式（每核 attach 到 tp_daemon）
+### 2) SGDB 接入模式（每核 attach 到 tp 进程）
 
 传入 `--ip` 即进入 SGDB 模式：每个核以 `gdb-multiarch` 启动，自动 `source plugins/gdbinit.py` 并执行 `tp-attach <device> <device-id> <core> <ip>`。
 
@@ -84,10 +84,10 @@ PYTHONPATH=. multitui/.venv/bin/python multitui/__main__.py --ip ...
 
 参数：
 
-- `--ip`：目标设备 IP（给了就进 SGDB 模式）；
-- `--device`：设备类型，默认 `1690`（可 `1690e`）；
+- `--ip`：目标设备 IP
+- `--device`：设备类型，默认 `1690`（可 `1690e`、`cv84x6`）；
 - `--device-id`：默认 `0`；
-- `--cores`：核数，不传则取设备默认（1690=2，1690e=4）；
+- `--cores`：核数，不传则取设备默认（1690=8，1690e/cv84x6=4）；
 - `--gdb`：默认 `gdb-multiarch`。
 
 端口 = `40090 + device-id*100 + core`。需保证该端口（设备/代理）可达，且 sgdb 插件目录完整。

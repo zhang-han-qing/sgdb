@@ -226,7 +226,12 @@ class CorePollingThread(threading.Thread):
 
         for _ in range(MAX_DRAIN_BATCH):
             assert self.manager.dbgfifo_vaddr is not None
-            chunk = read_available(self.manager.dbgfifo_vaddr, self.core_id, DIR_D2H)
+            chunk = read_available(
+                self.manager.dbg_event_fd,
+                self.manager.dbgfifo_vaddr,
+                self.core_id,
+                DIR_D2H,
+            )
             if not chunk:
                 break
             if not self._send_chunk(conn, chunk):
@@ -235,7 +240,12 @@ class CorePollingThread(threading.Thread):
 
         for _ in range(MAX_DRAIN_BATCH):
             assert self.manager.dbgfifo_vaddr is not None
-            chunk = read_available(self.manager.dbgfifo_vaddr, self.core_id, DIR_D2H_ASYNC)
+            chunk = read_available(
+                self.manager.dbg_event_fd,
+                self.manager.dbgfifo_vaddr,
+                self.core_id,
+                DIR_D2H_ASYNC,
+            )
             if not chunk:
                 break
             if not self._forward_async_error(conn, chunk):

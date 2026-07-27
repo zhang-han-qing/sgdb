@@ -2,7 +2,7 @@
 Description=TPU GDB transparent proxy (dev-index %i, host-side FIFO)
 After=network.target
 # 单卡机器上未 probe 的 index 不启动，避免无节点时反复 restart
-ConditionPathExists=/dev/sg-host-drv-%i
+ConditionPathExists=/dev/tpu_dbg_event%i
 
 # 由 modprobe 钩子 / udev 按需 start；若要开机自启请 enable gdb-proxy@N
 

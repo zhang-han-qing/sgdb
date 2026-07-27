@@ -4,9 +4,9 @@ set -eu
 ACTION="${1:-start}"
 
 list_device_indexes() {
-    for node in /dev/sg-host-drv-*; do
+    for node in /dev/tpu_dbg_event*; do
         [ -e "$node" ] || continue
-        idx="${node##*-}"
+        idx="${node##*tpu_dbg_event}"
         case "$idx" in
             ''|*[!0-9]*) continue ;;
         esac
