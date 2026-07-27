@@ -6,9 +6,9 @@ DEVICE_TYPE="${1:-1690}"
 
 case "${DEVICE_TYPE}" in
     1690) NUM_CORE=8 ;;
-    1690e) NUM_CORE=4 ;;
+    1690e|cv84x6) NUM_CORE=4 ;;
     *)
-        echo "install: unsupported device type: ${DEVICE_TYPE} (expect 1690|1690e)" >&2
+        echo "install: unsupported device type: ${DEVICE_TYPE} (expect 1690|1690e|cv84x6)" >&2
         exit 1
         ;;
 esac
@@ -61,9 +61,11 @@ GDB_PROXY_NUM_CORE=${NUM_CORE}
 EOF
 
 # --- modprobe 装/卸 sgcard 时自动 start/stop 服务 ---
-install -d "/etc/modprobe.d"
-install -m 0644 "${SCRIPT_DIR}/linux/modprobe.d/sgcard-gdb-proxy.conf" \
-    "/etc/modprobe.d/sgcard-gdb-proxy.conf"
+if [ "${DEVICE_TYPE}" != "cv84x6" ]; then
+    install -d "/etc/modprobe.d"
+    install -m 0644 "${SCRIPT_DIR}/linux/modprobe.d/sgcard-gdb-proxy.conf" \
+        "/etc/modprobe.d/sgcard-gdb-proxy.conf"
+fi
 
 # --- udev：节点出现时的兜底；reload-rules 后才保证立刻生效 ---
 install -d "/etc/udev/rules.d"

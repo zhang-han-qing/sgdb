@@ -15,8 +15,6 @@ from plugins.devices.registry import list_supported_device_names
 from plugins.state.tpu_threads import reset_tpu_thread_bindings
 from plugins.state.tpu_threads import set_tpu_thread_binding
 
-_REMOTE_TP_ROOTFS_CPIO = "/lib/firmware/tpuv7/tp_rootfs.cpio"
-
 
 def _parse_attach_arg(arg: str) -> tuple[str, int]:
     parts = arg.strip().split()
@@ -24,8 +22,9 @@ def _parse_attach_arg(arg: str) -> tuple[str, int]:
         raise gdb.GdbError("用法: tpu-attach <device-type> <device-id>（例如: tpu-attach 1690 0）")
 
     device_type, device_id_raw = parts
-    if device_type not in {"1690", "1690e"}:
-        raise gdb.GdbError(f"不支持设备类型: {device_type}（当前支持: 1690, 1690e）")
+    if get_device(device_type) is None:
+        supported = ", ".join(list_supported_device_names())
+        raise gdb.GdbError(f"不支持设备类型: {device_type}（当前支持: {supported}）")
     try:
         device_id = int(device_id_raw)
     except ValueError as exc:
@@ -75,9 +74,9 @@ def _find_cached_rootfs(device_name: str) -> Path | None:
     return None
 
 
-def _fetch_cpio(remote: str, output_path: Path) -> None:
+def _fetch_cpio(remote: str, remote_rootfs_cpio: str, output_path: Path) -> None:
     if remote:
-        remote_spec = f"{remote}:{_REMOTE_TP_ROOTFS_CPIO}"
+        remote_spec = f"{remote}:{remote_rootfs_cpio}"
         try:
             subprocess.run(["scp", remote_spec, str(output_path)], check=True)
         except FileNotFoundError as exc:
@@ -86,7 +85,7 @@ def _fetch_cpio(remote: str, output_path: Path) -> None:
             raise gdb.GdbError(f"SCP 拉取失败: {remote_spec} (exit={exc.returncode})") from exc
         return
 
-    local_cpio = Path(_REMOTE_TP_ROOTFS_CPIO)
+    local_cpio = Path(remote_rootfs_cpio)
     if not local_cpio.exists():
         raise gdb.GdbError(f"本地未找到 sysroot 包: {local_cpio}")
     shutil.copy2(local_cpio, output_path)
@@ -124,9 +123,13 @@ def _set_current_symlink(device_cache_dir: Path, version_dir: Path) -> None:
     current_link.symlink_to(version_dir.resolve(), target_is_directory=True)
 
 
-def _resolve_sysroot(device_name: str) -> Path | None:
+def _resolve_sysroot(device_name: str, remote_rootfs_cpio: str | None) -> Path | None:
     device_cache_dir = _cache_device_dir(device_name)
     device_cache_dir.mkdir(parents=True, exist_ok=True)
+
+    if remote_rootfs_cpio is None:
+        print(f"[tpu-attach] {device_name} 未配置 rootfs CPIO，跳过 sysroot 设置。")
+        return None
 
     if not input("[tpu-attach] update sysroot from remote? (y/N): ").strip().lower() in {"y", "yes"}:
         cached_rootfs = _find_cached_rootfs(device_name)
@@ -139,7 +142,7 @@ def _resolve_sysroot(device_name: str) -> Path | None:
     temp_cpio = device_cache_dir / "tp_rootfs.download.cpio"
     try:
         remote = input("[tpu-attach] remote machine name@ip (empty for local): ").strip()
-        _fetch_cpio(remote, temp_cpio)
+        _fetch_cpio(remote, remote_rootfs_cpio, temp_cpio)
         md5_value = _md5sum_file(temp_cpio)
         version_dir = device_cache_dir / md5_value
         version_rootfs = version_dir / "rootfs"
@@ -172,7 +175,7 @@ def _apply_sysroot(rootfs_dir: Path) -> None:
 
 
 class TPUAttachCommand(gdb.Command):
-    """tpu-attach <device-type> <device-id>: connect tp-sys(s) and attach tp_daemon."""
+    """tpu-attach <device-type> <device-id>: connect TP cores and attach the registered process."""
 
     def __init__(self) -> None:
         super().__init__("tpu-attach", gdb.COMMAND_USER)
@@ -193,7 +196,10 @@ class TPUAttachCommand(gdb.Command):
             )
             return
 
-        resolved_sysroot = _resolve_sysroot(device_name=device.name)
+        resolved_sysroot = _resolve_sysroot(
+            device_name=device.name,
+            remote_rootfs_cpio=device.remote_rootfs_cpio,
+        )
         if resolved_sysroot is not None:
             _apply_sysroot(resolved_sysroot)
 

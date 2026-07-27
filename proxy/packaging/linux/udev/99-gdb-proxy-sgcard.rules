@@ -5,4 +5,4 @@
 #
 # 修改后：udevadm control --reload-rules && udevadm trigger
 
-ACTION=="add", KERNEL=="sg-host-drv-[0-9]*", TAG+="systemd", ENV{SYSTEMD_WANTS}+="gdb-proxy-refresh.service"
+ACTION=="add", KERNEL=="tpu_dbg_event[0-9]*", TAG+="systemd", ENV{SYSTEMD_WANTS}+="gdb-proxy-refresh.service"

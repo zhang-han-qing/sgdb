@@ -236,7 +236,9 @@ class GdbServiceThread(threading.Thread):
             if ring_dir is None:
                 continue # 报错
 
-            chunk = read_available(dbgfifo_vaddr, self.core_id, ring_dir)
+            chunk = read_available(
+                self.dbg_event_fd, dbgfifo_vaddr, self.core_id, ring_dir
+            )
             if chunk:
                 if ring_dir == DIR_D2H_ASYNC:
                     self._forward_async_error(conn, chunk)
@@ -265,7 +267,9 @@ class GdbServiceThread(threading.Thread):
     def _drain_device_rings(self, conn: socket.socket, dbgfifo_vaddr) -> bool:
         progressed = False
         while True:
-            chunk = read_available(dbgfifo_vaddr, self.core_id, DIR_D2H)
+            chunk = read_available(
+                self.dbg_event_fd, dbgfifo_vaddr, self.core_id, DIR_D2H
+            )
             if not chunk:
                 break
             self._send_chunk(conn, chunk)

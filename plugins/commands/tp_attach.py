@@ -6,8 +6,10 @@ import re
 
 import gdb
 
+from plugins.devices.registry import get_device
+from plugins.devices.registry import list_supported_device_names
+
 _BASE_PORT = 40090
-_SUPPORTED_DEVICE_TYPES = {"1690", "1690e"}
 # 连接 target 时，connect 的 syscall 可能被信号（如聚焦核启动时的 SIGWINCH）
 # 打断而抛出 "Interrupted system call"(EINTR)。仅对这种情况重试。
 _CONNECT_RETRIES = 2
@@ -28,12 +30,12 @@ def _connect_target(endpoint: str) -> None:
             raise
 
 
-def _pick_unique_tp_daemon_pid(info_text: str) -> int:
-    matched_lines = [line for line in info_text.splitlines() if "tp_daemon" in line]
+def _pick_unique_target_pid(info_text: str, target_process: str) -> int:
+    matched_lines = [line for line in info_text.splitlines() if target_process in line]
     if not matched_lines:
-        raise gdb.GdbError("未找到 COMMAND 包含 tp_daemon 的进程")
+        raise gdb.GdbError(f"未找到 COMMAND 包含 {target_process} 的进程")
     if len(matched_lines) > 1:
-        raise gdb.GdbError("找到多个 tp_daemon 进程，无法唯一 attach")
+        raise gdb.GdbError(f"找到多个 {target_process} 进程，无法唯一 attach")
 
     pid_match = re.search(r"\b(\d+)\b", matched_lines[0])
     if not pid_match:
@@ -47,17 +49,21 @@ def attach_core(
     core_id: int,
     ip: str,
 ) -> tuple[str, int]:
-    if device_type not in _SUPPORTED_DEVICE_TYPES:
+    device = get_device(device_type)
+    if device is None:
+        supported = ", ".join(list_supported_device_names())
         raise gdb.GdbError(
-            f"不支持设备类型: {device_type}（当前支持: {sorted(_SUPPORTED_DEVICE_TYPES)}）"
+            f"不支持设备类型: {device_type}（当前支持: {supported}）"
         )
     if device_id < 0 or core_id < 0:
         raise gdb.GdbError("device-id/core-id 必须是非负整数")
+    if core_id >= device.core_num:
+        raise gdb.GdbError(f"core-id 超出 {device_type} 范围: 0..{device.core_num - 1}")
 
     endpoint = build_endpoint(ip=ip, device_id=device_id, core_id=core_id)
     _connect_target(endpoint)
     info = gdb.execute("info os processes", to_string=True)
-    pid = _pick_unique_tp_daemon_pid(info)
+    pid = _pick_unique_target_pid(info, device.target_process)
     gdb.execute(f"attach {pid}", to_string=True)
     return endpoint, pid
 

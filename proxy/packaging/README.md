@@ -4,7 +4,7 @@
 
 - `linux/systemd/gdb-proxy@.service` — 按 `%i`（dev-index）启停 `proxy.py`。
 - `linux/default/gdb-proxy` — 全局默认参数（所有 `gdb-proxy@N` 共用）。
-- `linux/modprobe.d/sgcard-gdb-proxy.conf` — `modprobe` 时扫描 `/dev/sg-host-drv-*` 并启动全部实例。
+- `linux/modprobe.d/sgcard-gdb-proxy.conf` — `modprobe` 时扫描 `/dev/tpu_dbg_event*` 并启动全部实例。
 - `linux/udev/99-gdb-proxy-sgcard.rules` — 新设备节点出现时触发 `gdb-proxy-refresh.service` 兜底刷新。
 - `linux/systemd/gdb-proxy-refresh.service` — 调用脚本刷新实例列表。
 - `../scripts/gdb_proxy_instances.sh` — 扫描设备并批量 start/stop `gdb-proxy@N`。
@@ -12,7 +12,7 @@
 
 ## 1. 这套方案解决什么
 
-每个 `proxy.py` 进程绑定一个 `dev-index`，长期持有 `/dev/sg-host-drv-{N}` 与 `/dev/tpu_dbg_event{N}`。实例数量由当前设备节点自动决定。
+每个 `proxy.py` 进程绑定一个 `dev-index`，长期持有 `/dev/tpu_dbg_event{N}`。实例数量由当前设备节点自动决定。
 
 `modprobe`/`modprobe -r` 时钩子会统一 start/stop 全部实例；`udev` 在节点晚到时会触发一次 refresh。
 
@@ -29,9 +29,12 @@ sudo modprobe -r sgcard   # → stop 全部实例 → 卸模块
 cd path/to/gdb_proxy
 sudo sh packaging/install_sc11.sh              # 默认 1690 (8 core)
 sudo sh packaging/install_sc11.sh 1690e        # 1690e (4 core)
+sudo sh packaging/install.sh cv84x6            # CV84x6 (4 core)
 sudo systemctl daemon-reload
 sudo udevadm control --reload-rules
 ```
+
+CV84x6 不安装 `sgcard` modprobe hook，仅通过统一的 `tpu_dbg_event` udev 规则刷新实例。
 
 一般不必 `systemctl enable`；只跟模块走即可。
 

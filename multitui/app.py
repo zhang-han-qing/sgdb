@@ -343,6 +343,9 @@ class MultiTuiApp(App):
 
 
 def parse_args() -> argparse.Namespace:
+    from plugins.devices.registry import list_supported_device_names
+
+    supported_devices = list_supported_device_names()
     parser = argparse.ArgumentParser(
         description="Wrap N terminal sessions (gdb/bash/...) in one Textual UI."
     )
@@ -354,9 +357,14 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--cols", type=int, default=100, help="initial columns")
     parser.add_argument("--rows", type=int, default=30, help="initial rows")
-    # sgdb mode: enabled when --ip is given; each core attaches to its tp_daemon
+    # sgdb mode: enabled when --ip is given; each core attaches to its registered process
     parser.add_argument("--ip", default=None, help="enable SGDB mode: target IP for tp-attach")
-    parser.add_argument("--device", default="1690", help="SGDB device type (1690/1690e)")
+    parser.add_argument(
+        "--device",
+        default="1690",
+        choices=supported_devices,
+        help="SGDB device type (default: %(default)s)",
+    )
     parser.add_argument("--device-id", type=int, default=0, help="SGDB device id")
     parser.add_argument("--gdb", default="gdb-multiarch", help="gdb executable for SGDB mode")
     return parser.parse_args()

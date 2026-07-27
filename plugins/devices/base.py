@@ -14,6 +14,8 @@ class DeviceSpec:
     port_start: int
     port_end: int
     tpu_register_xml: str | None = None  # 在 host 端放 XML 文件
+    target_process: str = "tp_daemon"
+    remote_rootfs_cpio: str | None = "/lib/firmware/tpuv7/tp_rootfs.cpio"
 
     @staticmethod
     def parse_tcp_range(tcp_range: str) -> tuple[str, int, int]:
@@ -44,6 +46,8 @@ class Device2260EVB(DeviceSpec):
         core_num: int = 8,
         *,
         tpu_register_xml: str | None = None,
+        target_process: str = "tp_daemon",
+        remote_rootfs_cpio: str | None = "/lib/firmware/tpuv7/tp_rootfs.cpio",
     ) -> None:
         try:
             ip, port_start, port_end = DeviceSpec.parse_tcp_range(tcp_range)
@@ -57,4 +61,6 @@ class Device2260EVB(DeviceSpec):
             port_start=port_start,
             port_end=port_end,
             tpu_register_xml=tpu_register_xml,
+            target_process=target_process,
+            remote_rootfs_cpio=remote_rootfs_cpio,
         )
